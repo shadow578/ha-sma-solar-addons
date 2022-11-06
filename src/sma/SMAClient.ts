@@ -1,12 +1,10 @@
 import SMABaseClient from "./BaseClient";
+import { ChannelValues } from "./Model";
 
 /**
  * api client for SMA Data Manager M
  */
 export default class SMAClient extends SMABaseClient {
-
-
-
     //#region auth
     /**
      * log into the SMA data manager
@@ -22,9 +20,16 @@ export default class SMAClient extends SMABaseClient {
         }, {
             headers: {
                 ...this.originHeaders,
-                "Content-Type": "application/x-www-form-urlencoded"
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json"
             }
         });
+
+        // update session id
+        this.updateSessionId(tokenResponse);
+        if (!this.sessionId) {
+            throw new Error("failed to get session id");
+        }
 
         // get access token
         const token = tokenResponse.data;
@@ -49,4 +54,40 @@ export default class SMAClient extends SMABaseClient {
     }
     //#endregion
 
+    //#region live data
+    /**
+     * get live data for all channels of the requested components
+     * 
+     * @param componentIds the components to get live data of
+     * @returns the live data for all available channels of the requested components
+     */
+    async getLiveMeasurements(componentIds: string[]): Promise<ChannelValues[]> {
+
+        const payload = componentIds.map(componentId => { return { componentId }; });
+        const measurementsResponse = await this.api.post("measurements/live",
+            payload, {
+            headers: {
+                ...this.authHeaders,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+        });
+
+        // validate data format
+        const data = measurementsResponse.data;
+        if (!Array.isArray(data)
+            || !data.every(cv =>
+                typeof (cv.channelId) === "string"
+                && typeof (cv.componentId) === "string"
+                && Array.isArray(cv.values)
+                && cv.values.every((tvp: any) =>
+                    (typeof (tvp.value) === "number" || typeof (tvp.value) === "string" || typeof (tvp.value) === "undefined")
+                    && typeof (tvp.time) === "string"))
+        ) {
+            throw new Error("failed to validate live data response");
+        }
+
+        return data;
+    }
+    //#endregion
 }

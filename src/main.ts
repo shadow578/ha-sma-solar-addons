@@ -18,6 +18,16 @@ async function main() {
   await sma.login(SMA_USERNAME, SMA_PASSWORD);
   console.log("logged in!");
 
+  // get live data example
+  const vals = await sma.getLiveMeasurements([
+    "Plant:1"
+  ]);
+  console.log(`got ${vals.length} values!`);
+  vals.forEach(v => {
+    console.log(`${v.channelId} @ ${v.componentId} == ${v.values[0].value} @ ${v.values[0].time}`);
+  });
+
+
   // logout after we're finished
   await sma.logout();
   console.log("logged out");
