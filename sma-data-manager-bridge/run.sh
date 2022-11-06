@@ -8,5 +8,5 @@ export SMA_PASSWORD=$(bashio::config 'sma_password')
 
 # start application
 bashio::log.info "starting connector"
-node .
+node /usr/app/
 bashio::log.info "connector shut down"

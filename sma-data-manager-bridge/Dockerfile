@@ -1,4 +1,8 @@
-FROM node:16
+ARG BUILD_FROM="alpine:latest"
+FROM $BUILD_FROM
+
+# install nodejs and npm
+RUN apk add --no-cache --update nodejs npm
 
 # create app directory
 WORKDIR /usr/app
@@ -15,5 +19,5 @@ RUN npm run build
 EXPOSE 8080
 
 # copy launch script
-RUN chmod a+x /run.sh
-CMD [ "./run.sh" ]
+RUN chmod a+x /usr/app/run.sh
+CMD [ "/usr/app/run.sh" ]
