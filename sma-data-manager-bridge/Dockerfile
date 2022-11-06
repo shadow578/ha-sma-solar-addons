@@ -11,6 +11,9 @@ RUN npm install
 # build the app
 RUN npm run build
 
-# define app entry & ports
+# expose port 8080
 EXPOSE 8080
-CMD [ "node", "." ]
+
+# copy launch script
+RUN chmod a+x /run.sh
+CMD [ "./run.sh" ]

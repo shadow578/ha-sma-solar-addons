@@ -1,0 +1,4 @@
+# https://developers.home-assistant.io/docs/add-ons/repository#repository-configuration
+name: shadow578's SMA Solar Add-On
+url: "https://github.com/shadow578/ha-sma-solar-addons"
+maintainer: shadow578 <52449218+shadow578@users.noreply.github.com>
