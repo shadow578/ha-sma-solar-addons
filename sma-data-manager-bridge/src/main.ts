@@ -39,20 +39,18 @@ app.get<{ component_ids?: string, unique_channels_only?: boolean; }>(`/api/live-
 
   // send response
   if (data !== undefined && data.length > 0) {
-    // remove duplicate channel ids
     if (uniqueChannelsOnly) {
-      let filteredData: ChannelValues[] = [];
+      let responseData: Record<string, string | number> = {};
       data.forEach(cv => {
-        if (!filteredData.some(cvf => cvf.channelId === cv.channelId)) {
-          filteredData.push(cv);
+        if (cv.values.length > 0 && cv.values[0].value !== undefined) {
+          responseData[cv.channelId.replaceAll(".", "_")] = cv.values[0].value;
         }
       });
-      data = filteredData;
-    }
 
-    // send the response
-    res.status(200).send(
-      data.flatMap(cv => {
+      // send the response
+      res.status(200).send(responseData);
+    } else {
+      let responseData = data.flatMap(cv => {
         if (cv.values.length <= 0 || cv.values[0].value === undefined) return [];
         return [{
           componentId: cv.componentId,
@@ -60,8 +58,11 @@ app.get<{ component_ids?: string, unique_channels_only?: boolean; }>(`/api/live-
           value: cv.values[0].value,
           time: cv.values[0].time
         }];
-      })
-    );
+      });
+
+      // send the response
+      res.status(200).send(responseData);
+    }
   } else {
     res.status(500).send();
   }
