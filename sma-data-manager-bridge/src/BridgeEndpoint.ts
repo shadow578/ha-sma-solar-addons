@@ -9,12 +9,16 @@ import SMAClient from "./sma/SMAClient";
  * @param app the express instance
  * @param uri uri of the api endpoint
  */
-export function register(app: Express, uri: string, cooldown: number = 60) {
+export function register(app: Express, uri: string, cooldown: number = 60, printRequests: boolean = false) {
     let lastQueryTime: Date | undefined;
     const STATUS_KEY = "bridge_status";
 
     app.use(expressJson());
     app.post<any, any, ResponseBody, RequestBody>(uri, async (request, response) => {
+        if (printRequests) {
+            console.log(request.body);
+        }
+
         //#region validate request body
         const body = request.body;
         if (typeof (body.host) !== "string"

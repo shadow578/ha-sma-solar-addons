@@ -1,5 +1,5 @@
 slug: "sma_data_manager_bridge_addon"
-version: "0.2.0"
+version: "0.2.1"
 name: "SMA Data Manager Bridge"
 description: "SMA Data Manager Bridge"
 url: "https://github.com/shadow578/ha-sma-solar-addons/tree/main/sma-data-manager-bridge"
@@ -10,3 +10,7 @@ arch:
   - armv7
   - armhf
   - i386
+options:
+  debug_requests: "FALSE"
+schema:
+  debug_requests: str
