@@ -18,23 +18,59 @@ Follow these setps to get the add-on installed on your system:
 
 ## How to Use
 
-Use the bridge to build a rest sensor like below.
+You can use the bridge to build sensors from the component and channel data.
+Example (add to configuration.yaml):
 
-````yaml
+```yaml
 # sma data manager config
 sensor:
   - platform: rest
     name: sma_data_mgr
+    resource: http://<id>-sma-data-manager-bridge-addon:8080/bridge
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: >-
+      {
+        "host": "<SMA Data Manager hostname>",
+        "username": "...",
+        "password": "...",
+        "query": [
+          {
+            "component": "SD2P:0172-3014277358",
+            "channel": "Measurement.Bat.ChaStt",
+            "alias": "Bat_ChargeLevel"
+          },
+          {
+            "component": "SD2P:0172-3014277358",
+            "channel": "Measurement.Bat.TmpVal",
+            "alias": "Bat_Temperature"
+          }
+        ]
+      }
+    value_template: "{{ value_json.bridge_status }}"
     json_attributes:
-      - Measurement_Bat_ChaStt
-      - Measurement_Operation_Health
-    resource: http://sma-data-manager-bridge-addon:8080/api/live-data?component_ids=[%22Plant:1%22]&unique_channels_only=true
-    value_template: "{{ value_json.Measurement_Operation_Health }}"
+      - bridge_status
+      - Bat_ChargeLevel
+      - Bat_Temperature
     scan_interval: 600
   - platform: template
     sensors:
-      sma_measurement_bat_chastt:
-        friendly_name: "Measurement_Bat_ChaStt"
-        value_template: "{{ state_attr('sensor.sma_data_mgr', 'Measurement_Bat_ChaStt') }}"
+      # SMA Batterie
+      sma_bat_chargelevel:
+        friendly_name: "Aktueller Batterieladestand"
+        value_template: "{{ state_attr('sensor.sma_data_mgr', 'Bat_ChargeLevel') }}"
         unit_of_measurement: "%"
+      sma_bat_temperature:
+        friendly_name: "Batterietemperatur"
+        value_template: "{{ state_attr('sensor.sma_data_mgr', 'Bat_Temperature') }}"
+        unit_of_measurement: "°C"
 ```
+
+> Note: Component and Channel ids are equal to those displayed in the SMA Data Manager Webportal (live data view)
+
+> Note: the 'bridge_status' field contains information about the request status, like errors or warnings
+
+> Note: when receiving a bridge_status of 'invalid request body', you may set the 'debug_requests' option of the add-on to 'TRUE' to see what data is received by the bridge
+
+> Note: The bridge endpoint is rate limited to one request every 60 seconds to reduce load on the data manager. this limit may be changed using the 'cooldown' option of the add-on

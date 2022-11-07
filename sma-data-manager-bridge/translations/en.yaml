@@ -1,0 +1,10 @@
+---
+configuration:
+  cooldown:
+    name: Bridge API Cooldown (Seconds)
+    description: >-
+      Cooldown between requests to the Bridge API endpoint, in seconds
+  debug_requests:
+    name: Enable Request Debugging
+    description: >-
+      Print request data to the output. Useful when debugging formatting issues
