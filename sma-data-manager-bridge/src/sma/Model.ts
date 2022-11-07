@@ -23,3 +23,16 @@ export interface TimeValuePair {
     value?: (string | number),
     time: string;
 }
+
+/**
+ * a single query item for measurements/live endpoint
+ */
+export interface LiveMeasurementQueryItem {
+    componentId: string,
+    channelId: string,
+
+    /**
+     * NOTE: function is unknown, default to empty
+     */
+    multiAggregate?: string;
+}
