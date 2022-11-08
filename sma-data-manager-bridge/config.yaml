@@ -1,5 +1,5 @@
 slug: "sma_data_manager_bridge_addon"
-version: "0.2.2"
+version: "0.2.3"
 name: "SMA Data Manager Bridge"
 description: "SMA Data Manager Bridge"
 url: "https://github.com/shadow578/ha-sma-solar-addons/tree/main/sma-data-manager-bridge"

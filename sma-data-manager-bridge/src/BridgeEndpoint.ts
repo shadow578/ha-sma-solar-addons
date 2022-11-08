@@ -1,6 +1,6 @@
 import { AxiosError } from "axios";
 import { Express, json as expressJson } from "express";
-import { ChannelValues } from "./sma/Model";
+import { ChannelValues, LiveMeasurementQueryItem, TimeValuePair } from "./sma/Model";
 import SMAClient from "./sma/SMAClient";
 
 /**
@@ -12,6 +12,7 @@ import SMAClient from "./sma/SMAClient";
 export function register(app: Express, uri: string, cooldown: number = 60, printRequests: boolean = false) {
     let lastQueryTime: Date | undefined;
     const STATUS_KEY = "bridge_status";
+    const cachedClients: Record<string, SMAClient> = {};
 
     app.use(expressJson());
     app.post<any, any, ResponseBody, RequestBody>(uri, async (request, response) => {
@@ -65,42 +66,62 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
         //#endregion
 
         //#region execute the query
-        const sma = new SMAClient(body.host);
-        let didLogin = false;
-        let values: ChannelValues[];
-        try {
-            // login
-            await sma.login(body.username, body.password);
-            didLogin = true;
+        let values: ChannelValues[] | undefined = undefined;
+        const query = body.query.map(({ component: componentId, channel: channelId }) => ({ componentId, channelId }));
 
-            // transform query
-            const query = body.query.map(({ component: componentId, channel: channelId }) => ({ componentId, channelId }));
-
-            // execute the query
-            values = await sma.getLiveMeasurements(query);
-        } catch (err) {
-            // check if hostname was not found
-            let details = "unknown error";
-            if (err instanceof Error && err.message.includes("ENOTFOUND")) {
-                details = `host ${body.host} could not be resolved`;
+        // try with a cached client first
+        let sma = cachedClients[body.host];
+        if (sma) {
+            try {
+                values = await sma.getLiveMeasurements(query);
+            } catch (err) {
+                console.error(`sma query from cached client failed: ${err})`);
+                try {
+                    await sma.logout();
+                } catch (_) { }
             }
-            if (err instanceof AxiosError && err.code === "ERR_BAD_REQUEST" && !didLogin) {
-                details = `login failed`;
-            }
+        }
 
-            // generic error
-            console.error(`sma query failed: ${err} (${details})`);
+        // if cached client failed, try a new one
+        if (!sma || values === undefined || values.length === 0) {
+            sma = new SMAClient(body.host);
+            cachedClients[body.host] = sma;
+            let didLogin = false;
+            try {
+                // login
+                await sma.login(body.username, body.password);
+                didLogin = true;
+
+                // transform query
+                const query = body.query.map(({ component: componentId, channel: channelId }) => ({ componentId, channelId }));
+
+                // execute the query
+                values = await sma.getLiveMeasurements(query);
+            } catch (err) {
+                // check if hostname was not found
+                let details = "unknown error";
+                if (err instanceof Error && err.message.includes("ENOTFOUND")) {
+                    details = `host ${body.host} could not be resolved`;
+                }
+                if (err instanceof AxiosError && err.code === "ERR_BAD_REQUEST" && !didLogin) {
+                    details = `login failed`;
+                }
+
+                // generic error
+                console.error(`sma query failed: ${err} (${details})`);
+                response.status(500).send({
+                    [STATUS_KEY]: `request failed: ${details}`
+                });
+                return;
+            }
+        }
+
+        // check there are now values
+        if (values === undefined || values.length === 0) {
             response.status(500).send({
-                [STATUS_KEY]: `request failed: ${details}`
+                [STATUS_KEY]: `request failed: empty result`
             });
             return;
-        } finally {
-            try {
-                await sma.logout();
-            } catch (err) {
-                // do not fail if logout fails
-                console.error(`sma logout failed: ${err}`);
-            }
         }
         //#endregion
 
@@ -131,7 +152,7 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
 
         //#region validate all requested values are present
         body.query.forEach(qi => {
-            let v = values.find(vi => vi.componentId == qi.component && vi.channelId == qi.channel);
+            let v = values!!.find(vi => vi.componentId == qi.component && vi.channelId == qi.channel);
             if (v === undefined) {
                 responseBody[STATUS_KEY] += `; ${qi.component}::${qi.channel} was not found`;
             } else if (v.values.length === 0 || v.values[0].value === undefined) {
