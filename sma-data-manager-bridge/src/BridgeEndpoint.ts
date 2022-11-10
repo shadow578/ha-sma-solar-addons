@@ -1,7 +1,10 @@
 import { AxiosError } from "axios";
 import { Express, json as expressJson } from "express";
-import { ChannelValues } from "./sma/Model";
+import { ChannelValues, TimeValuePair } from "./sma/Model";
 import SMAClient from "./sma/SMAClient";
+
+const STATUS_KEY = "bridge_status";
+const MESSAGE_KEY = "bridge_status_message";
 
 /**
  * register the SMA Data Manager to REST bridge api
@@ -16,9 +19,9 @@ export function register(app: Express,
     cooldown: number = 60,
     printRequests: boolean = false,
     noHTTPErrorCodes: boolean = false) {
+
     let lastQueryTime: Date | undefined;
-    const STATUS_KEY = "bridge_status";
-    const MESSAGE_KEY = "bridge_status_message";
+    let lastQueryValues: ChannelValues[] | undefined;
     const cachedClients: Record<string, SMAClient> = {};
 
     app.use(expressJson());
@@ -60,71 +63,73 @@ export function register(app: Express,
         //#endregion
 
         //#region cooldown check
+        let serveFromCache = false;
+        let remainingCooldown = 0;
         const now = new Date();
         if (lastQueryTime) {
             let timeDelta = ((now.getTime() - lastQueryTime.getTime()) / 1000);
-            if (timeDelta < cooldown) {
-                // still in cooldown, fail the request
-                response.status(noHTTPErrorCodes ? 200 : 429).send({
-                    [STATUS_KEY]: "cooldown",
-                    [MESSAGE_KEY]: `too many requests, next request is allowed in ${Math.floor(cooldown - timeDelta)} seconds`
-                });
-                return;
-            }
+            serveFromCache = (timeDelta < cooldown);
+            remainingCooldown = Math.floor(cooldown - timeDelta);
         }
-        lastQueryTime = now;
         //#endregion
 
-        //#region execute the query
         let values: ChannelValues[] | undefined = undefined;
-        const query = body.query.map(({ component: componentId, channel: channelId }) => ({ componentId, channelId }));
+        if (!serveFromCache) {
+            //#region execute the query
+            const query = body.query.map(({ component: componentId, channel: channelId }) => ({ componentId, channelId }));
 
-        // try with a cached client first
-        let sma = cachedClients[body.host];
-        if (sma) {
-            try {
-                values = await sma.getLiveMeasurements(query);
-            } catch (err) {
-                console.error(`sma query from cached client failed: ${err})`);
+            // try with a cached client first
+            let sma = cachedClients[body.host];
+            if (sma) {
                 try {
-                    await sma.logout();
-                } catch (_) { }
-            }
-        }
-
-        // if cached client failed, try a new one
-        if (!sma || values === undefined || values.length === 0) {
-            sma = new SMAClient(body.host);
-            cachedClients[body.host] = sma;
-            let didLogin = false;
-            try {
-                // login
-                await sma.login(body.username, body.password);
-                didLogin = true;
-
-                // transform query
-                const query = body.query.map(({ component: componentId, channel: channelId }) => ({ componentId, channelId }));
-
-                // execute the query
-                values = await sma.getLiveMeasurements(query);
-            } catch (err) {
-                // check if hostname was not found
-                let details = "unknown error";
-                if (err instanceof Error && err.message.includes("ENOTFOUND")) {
-                    details = `host ${body.host} could not be resolved`;
+                    values = await sma.getLiveMeasurements(query);
+                } catch (err) {
+                    console.error(`sma query from cached client failed: ${err})`);
+                    try {
+                        await sma.logout();
+                    } catch (_) { }
                 }
-                if (err instanceof AxiosError && err.code === "ERR_BAD_REQUEST" && !didLogin) {
-                    details = `login failed`;
-                }
-
-                // generic error
-                console.error(`sma query failed: ${err} (${details})`);
-                response.status(noHTTPErrorCodes ? 200 : 500).send({
-                    [STATUS_KEY]: "request failed",
-                    [MESSAGE_KEY]: `request failed: ${details}`
-                });
-                return;
             }
+
+            // if cached client failed, try a new one
+            if (!sma || values === undefined || values.length === 0) {
+                sma = new SMAClient(body.host);
+                cachedClients[body.host] = sma;
+                let didLogin = false;
+                try {
+                    // login
+                    await sma.login(body.username, body.password);
+                    didLogin = true;
+
+                    // transform query
+                    const query = body.query.map(({ component: componentId, channel: channelId }) => ({ componentId, channelId }));
+
+                    // execute the query
+                    values = await sma.getLiveMeasurements(query);
+                } catch (err) {
+                    // check if hostname was not found
+                    let details = "unknown error";
+                    if (err instanceof Error && err.message.includes("ENOTFOUND")) {
+                        details = `host ${body.host} could not be resolved`;
+                    }
+                    if (err instanceof AxiosError && err.code === "ERR_BAD_REQUEST" && !didLogin) {
+                        details = `login failed`;
+                    }
+
+                    // generic error
+                    console.error(`sma query failed: ${err} (${details})`);
+                    response.status(noHTTPErrorCodes ? 200 : 500).send({
+                        [STATUS_KEY]: "request failed",
+                        [MESSAGE_KEY]: `request failed: ${details}`
+                    });
+                    return;
+                }
+            }
+            lastQueryTime = now;
+            //#endregion
+        } else {
+            // serve cached values
+            values = lastQueryValues;
         }
 
         // check there are now values
@@ -135,51 +140,70 @@ export function register(app: Express,
             });
             return;
         }
-        //#endregion
+        lastQueryValues = values;
 
-        const responseBody: ResponseBody = {
-            [STATUS_KEY]: "ok",
-            [MESSAGE_KEY]: ""
-        };
-
-        //#region transform query result
-        values.forEach(v => {
-            // only include values that have a value
-            if (v.values.length === 0 || v.values[0].value === undefined) {
-                return;
-            }
-
-            // try to find alias, fallback to channel id
-            let alias = body.query.find(qi => qi.component === v.componentId && qi.channel === v.channelId)?.alias || v.channelId;
-
-            // the alias must not be equal to the status key
-            if (responseBody[alias] !== undefined) {
-                responseBody[STATUS_KEY] = "ok with warnings";
-                responseBody[MESSAGE_KEY] += `alias ${alias} for ${v.componentId}::${v.channelId} is duplicate; `;
-                alias = v.channelId;
-            }
-
-            // write item to the response
-            responseBody[alias] = v.values[0].value;
-        });
-        //#endregion
-
-        //#region validate all requested values are present
-        body.query.forEach(qi => {
-            let v = values!!.find(vi => vi.componentId == qi.component && vi.channelId == qi.channel);
-            if (v === undefined) {
-                responseBody[STATUS_KEY] = "ok with warnings";
-                responseBody[MESSAGE_KEY] += `; ${qi.component}::${qi.channel} was not found`;
-            } else if (v.values.length === 0 || v.values[0].value === undefined) {
-                responseBody[STATUS_KEY] = "ok with warnings";
-                responseBody[MESSAGE_KEY] += `; ${qi.component}::${qi.channel} had no value`;
-            }
-        });
-        //#endregion
+        // send sesponse
+        const { responseBody, hasWarnings } = prepareResponseBody(body.query, values);
+        responseBody[STATUS_KEY] = `${serveFromCache ? "CACHE" : "LIVE"} ${hasWarnings ? "with warnings" : ""}`;
+        if (serveFromCache) {
+            responseBody[MESSAGE_KEY] += `next request allowed in ${remainingCooldown} seconds`;
+        }
 
         response.status(200).send(responseBody);
     });
 }
+
+/**
+ * prepare the response body
+ * 
+ * @param query the query items to apply to the response
+ * @param values values returned by the SMA api
+ * @returns the prepared response body (without RESPONSE_KEY) + metadata
+ */
+function prepareResponseBody(query: ChannelQueryItem[], values: ChannelValues[]): { responseBody: ResponseBody, hasWarnings: boolean; } {
+    let hasWarnings = false;
+    const responseBody: ResponseBody = {
+        [MESSAGE_KEY]: ""
+    };
+
+    //#region transform query result
+    values.forEach(v => {
+        // only include values that have a value
+        if (v.values.length === 0 || v.values[0].value === undefined) {
+            return;
+        }
+
+        // try to find alias, fallback to channel id
+        let alias = query.find(qi => qi.component === v.componentId && qi.channel === v.channelId)?.alias || v.channelId;
+
+        // the alias must not be equal to the status key
+        if (responseBody[alias] !== undefined) {
+            hasWarnings = true;
+            responseBody[MESSAGE_KEY] += `alias ${alias} for ${v.componentId}::${v.channelId} is duplicate; `;
+            alias = v.channelId;
+        }
+
+        // write item to the response
+        responseBody[alias] = v.values[0].value;
+    });
+    //#endregion
+
+    //#region validate all requested values are present
+    query.forEach(qi => {
+        let v = values!!.find(vi => vi.componentId == qi.component && vi.channelId == qi.channel);
+        if (v === undefined) {
+            hasWarnings = true;
+            responseBody[MESSAGE_KEY] += `${qi.component}::${qi.channel} was not found; `;
+        } else if (v.values.length === 0 || v.values[0].value === undefined) {
+            hasWarnings = true;
+            responseBody[MESSAGE_KEY] += `${qi.component}::${qi.channel} had no value; `;
+        }
+    });
+    //#endregion
+
+    return { responseBody, hasWarnings };
+}
+
 
 interface RequestBody {
     host: string,
