@@ -8,3 +8,7 @@ configuration:
     name: Enable Request Debugging
     description: >-
       Print request data to the output. Useful when debugging formatting issues
+  no_http_error_codes:
+    name: Disable HTTP Error Codes
+    description: >-
+      If enabled, disables all HTTP Error codes. The bridge api will always return '200 OK', even if a error occured.

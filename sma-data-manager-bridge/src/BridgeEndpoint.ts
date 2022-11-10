@@ -8,8 +8,14 @@ import SMAClient from "./sma/SMAClient";
  * 
  * @param app the express instance
  * @param uri uri of the api endpoint
+ * @param printRequests print all request bodies to console, for debugging
+ * @param noHTTPErrorCodes disable http error codes, use 200 OK always
  */
-export function register(app: Express, uri: string, cooldown: number = 60, printRequests: boolean = false) {
+export function register(app: Express,
+    uri: string,
+    cooldown: number = 60,
+    printRequests: boolean = false,
+    noHTTPErrorCodes: boolean = false) {
     let lastQueryTime: Date | undefined;
     const STATUS_KEY = "bridge_status";
     const MESSAGE_KEY = "bridge_status_message";
@@ -33,7 +39,7 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
                 && typeof (qi.channel) === "string"
                 && (qi.alias === undefined || typeof (qi.alias) === "string"))) {
             // request body is invalid
-            response.status(400).send({
+            response.status(noHTTPErrorCodes ? 200 : 400).send({
                 [STATUS_KEY]: "invalid request",
                 [MESSAGE_KEY]: "the request body was not valid"
             });
@@ -44,7 +50,7 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
         for (const [index, qi] of body.query.entries()) {
             let i = body.query.findIndex((sqi) => qi.channel === sqi.channel && qi.component == sqi.component);
             if (i !== index) {
-                response.status(400).send({
+                response.status(noHTTPErrorCodes ? 200 : 400).send({
                     [STATUS_KEY]: "invalid query",
                     [MESSAGE_KEY]: `query item ${qi.component}::${qi.channel} is duplicate`
                 });
@@ -59,7 +65,7 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
             let timeDelta = ((now.getTime() - lastQueryTime.getTime()) / 1000);
             if (timeDelta < cooldown) {
                 // still in cooldown, fail the request
-                response.status(429).send({
+                response.status(noHTTPErrorCodes ? 200 : 429).send({
                     [STATUS_KEY]: "cooldown",
                     [MESSAGE_KEY]: `too many requests, next request is allowed in ${Math.floor(cooldown - timeDelta)} seconds`
                 });
@@ -113,7 +119,7 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
 
                 // generic error
                 console.error(`sma query failed: ${err} (${details})`);
-                response.status(500).send({
+                response.status(noHTTPErrorCodes ? 200 : 500).send({
                     [STATUS_KEY]: "request failed",
                     [MESSAGE_KEY]: `request failed: ${details}`
                 });
@@ -123,7 +129,7 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
 
         // check there are now values
         if (values === undefined || values.length === 0) {
-            response.status(500).send({
+            response.status(noHTTPErrorCodes ? 200 : 500).send({
                 [STATUS_KEY]: "no results",
                 [MESSAGE_KEY]: `request failed: empty result`
             });

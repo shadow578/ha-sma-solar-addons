@@ -12,7 +12,9 @@ arch:
   - i386
 options:
   cooldown: 60
-  debug_requests: false
+  debug_requests: false,
+  no_http_error_codes: false
 schema:
   cooldown: int
   debug_requests: bool
+  no_http_error_codes: bool
