@@ -22,7 +22,7 @@ export function register(app: Express,
 
     let lastQueryTime: Date | undefined;
     let lastQueryValues: ChannelValues[] | undefined;
-    const cachedClients: Record<string, SMAClient> = {};
+    let cachedClient: SMAClient|undefined;
 
     app.use(expressJson());
     app.post<any, any, ResponseBody, RequestBody>(uri, async (request, response) => {
@@ -79,7 +79,7 @@ export function register(app: Express,
             const query = body.query.map(({ component: componentId, channel: channelId }) => ({ componentId, channelId }));
 
             // try with a cached client first
-            let sma = cachedClients[body.host];
+            let sma = cachedClient;
             if (sma) {
                 try {
                     values = await sma.getLiveMeasurements(query);
@@ -94,7 +94,7 @@ export function register(app: Express,
             // if cached client failed, try a new one
             if (!sma || values === undefined || values.length === 0) {
                 sma = new SMAClient(body.host);
-                cachedClients[body.host] = sma;
+                cachedClient = sma;
                 let didLogin = false;
                 try {
                     // login
