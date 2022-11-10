@@ -1,6 +1,6 @@
 import { AxiosError } from "axios";
 import { Express, json as expressJson } from "express";
-import { ChannelValues, LiveMeasurementQueryItem, TimeValuePair } from "./sma/Model";
+import { ChannelValues } from "./sma/Model";
 import SMAClient from "./sma/SMAClient";
 
 /**
@@ -12,6 +12,7 @@ import SMAClient from "./sma/SMAClient";
 export function register(app: Express, uri: string, cooldown: number = 60, printRequests: boolean = false) {
     let lastQueryTime: Date | undefined;
     const STATUS_KEY = "bridge_status";
+    const MESSAGE_KEY = "bridge_status_message";
     const cachedClients: Record<string, SMAClient> = {};
 
     app.use(expressJson());
@@ -33,7 +34,8 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
                 && (qi.alias === undefined || typeof (qi.alias) === "string"))) {
             // request body is invalid
             response.status(400).send({
-                [STATUS_KEY]: "invalid request body"
+                [STATUS_KEY]: "invalid request",
+                [MESSAGE_KEY]: "the request body was not valid"
             });
             return;
         }
@@ -43,7 +45,8 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
             let i = body.query.findIndex((sqi) => qi.channel === sqi.channel && qi.component == sqi.component);
             if (i !== index) {
                 response.status(400).send({
-                    [STATUS_KEY]: `query item ${qi.component}::${qi.channel} is duplicate`
+                    [STATUS_KEY]: "invalid query",
+                    [MESSAGE_KEY]: `query item ${qi.component}::${qi.channel} is duplicate`
                 });
                 return;
             }
@@ -57,7 +60,8 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
             if (timeDelta < cooldown) {
                 // still in cooldown, fail the request
                 response.status(429).send({
-                    [STATUS_KEY]: `too many requests, next request is allowed in ${Math.floor(cooldown - timeDelta)} seconds`
+                    [STATUS_KEY]: "cooldown",
+                    [MESSAGE_KEY]: `too many requests, next request is allowed in ${Math.floor(cooldown - timeDelta)} seconds`
                 });
                 return;
             }
@@ -110,7 +114,8 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
                 // generic error
                 console.error(`sma query failed: ${err} (${details})`);
                 response.status(500).send({
-                    [STATUS_KEY]: `request failed: ${details}`
+                    [STATUS_KEY]: "request failed",
+                    [MESSAGE_KEY]: `request failed: ${details}`
                 });
                 return;
             }
@@ -119,14 +124,16 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
         // check there are now values
         if (values === undefined || values.length === 0) {
             response.status(500).send({
-                [STATUS_KEY]: `request failed: empty result`
+                [STATUS_KEY]: "no results",
+                [MESSAGE_KEY]: `request failed: empty result`
             });
             return;
         }
         //#endregion
 
         const responseBody: ResponseBody = {
-            [STATUS_KEY]: "ok"
+            [STATUS_KEY]: "ok",
+            [MESSAGE_KEY]: ""
         };
 
         //#region transform query result
@@ -141,7 +148,8 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
 
             // the alias must not be equal to the status key
             if (responseBody[alias] !== undefined) {
-                responseBody[STATUS_KEY] += `; alias ${alias} for ${v.componentId}::${v.channelId} is duplicate`;
+                responseBody[STATUS_KEY] = "ok with warnings";
+                responseBody[MESSAGE_KEY] += `alias ${alias} for ${v.componentId}::${v.channelId} is duplicate; `;
                 alias = v.channelId;
             }
 
@@ -154,9 +162,11 @@ export function register(app: Express, uri: string, cooldown: number = 60, print
         body.query.forEach(qi => {
             let v = values!!.find(vi => vi.componentId == qi.component && vi.channelId == qi.channel);
             if (v === undefined) {
-                responseBody[STATUS_KEY] += `; ${qi.component}::${qi.channel} was not found`;
+                responseBody[STATUS_KEY] = "ok with warnings";
+                responseBody[MESSAGE_KEY] += `; ${qi.component}::${qi.channel} was not found`;
             } else if (v.values.length === 0 || v.values[0].value === undefined) {
-                responseBody[STATUS_KEY] += `; ${qi.component}::${qi.channel} had no value`;
+                responseBody[STATUS_KEY] = "ok with warnings";
+                responseBody[MESSAGE_KEY] += `; ${qi.component}::${qi.channel} had no value`;
             }
         });
         //#endregion
