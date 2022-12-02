@@ -22,7 +22,7 @@ export function register(app: Express,
 
     let lastQueryTime: Date | undefined;
     let lastQueryValues: ChannelValues[] | undefined;
-    let cachedClient: SMAClient|undefined;
+    let cachedClient: SMAClient | undefined;
 
     app.use(expressJson());
     app.post<any, any, ResponseBody, RequestBody>(uri, async (request, response) => {
@@ -35,6 +35,7 @@ export function register(app: Express,
         if (typeof (body.host) !== "string"
             || typeof (body.username) !== "string"
             || typeof (body.password) !== "string"
+            || (typeof (body.no_warning_on_fallback) !== "undefined" && typeof (body.no_warning_on_fallback) !== "boolean")
             || !Array.isArray(body.query)
             || body.query.length === 0
             || !body.query.every(qi =>
@@ -143,7 +144,7 @@ export function register(app: Express,
         lastQueryValues = values;
 
         // send sesponse
-        const { responseBody, hasWarnings } = prepareResponseBody(body.query, values);
+        const { responseBody, hasWarnings } = prepareResponseBody(body.query, values, body.no_warning_on_fallback || false);
         responseBody[STATUS_KEY] = `${serveFromCache ? "CACHE" : "LIVE"} ${hasWarnings ? "with warnings" : ""}`;
         if (serveFromCache) {
             responseBody[MESSAGE_KEY] += `next request allowed in ${remainingCooldown} seconds`;
@@ -158,9 +159,10 @@ export function register(app: Express,
  * 
  * @param query the query items to apply to the response
  * @param values values returned by the SMA api
+ * @param noWarningOnFallback disable warnings when a fallback value was used
  * @returns the prepared response body (without RESPONSE_KEY) + metadata
  */
-function prepareResponseBody(query: ChannelQueryItem[], values: ChannelValues[]): { responseBody: ResponseBody, hasWarnings: boolean; } {
+function prepareResponseBody(query: ChannelQueryItem[], values: ChannelValues[], noWarningOnFallback: boolean): { responseBody: ResponseBody, hasWarnings: boolean; } {
     let hasWarnings = false;
     const responseBody: ResponseBody = {
         [MESSAGE_KEY]: ""
@@ -168,13 +170,22 @@ function prepareResponseBody(query: ChannelQueryItem[], values: ChannelValues[])
 
     //#region transform query result
     values.forEach(v => {
-        // only include values that have a value
-        if (v.values.length === 0 || v.values[0].value === undefined) {
+        // find corrosponding query for this value
+        let qe = query.find(qi => qi.component === v.componentId && qi.channel === v.channelId);
+
+        // resolve the value of this entry, with fallback
+        let value = qe?.fallback;
+        if (v.values.length > 0 && v.values[0].value !== undefined) {
+            value = v.values[0].value;
+        }
+
+        // skip if no value
+        if (value === undefined) {
             return;
         }
 
         // try to find alias, fallback to channel id
-        let alias = query.find(qi => qi.component === v.componentId && qi.channel === v.channelId)?.alias || v.channelId;
+        let alias = qe?.alias || v.channelId;
 
         // the alias must not be equal to the status key
         if (responseBody[alias] !== undefined) {
@@ -184,7 +195,7 @@ function prepareResponseBody(query: ChannelQueryItem[], values: ChannelValues[])
         }
 
         // write item to the response
-        responseBody[alias] = v.values[0].value;
+        responseBody[alias] = value;
     });
     //#endregion
 
@@ -195,6 +206,11 @@ function prepareResponseBody(query: ChannelQueryItem[], values: ChannelValues[])
             hasWarnings = true;
             responseBody[MESSAGE_KEY] += `${qi.component}::${qi.channel} was not found; `;
         } else if (v.values.length === 0 || v.values[0].value === undefined) {
+            // ignore if fallback is set and noWarningOnFallback
+            if (qi.fallback !== undefined && noWarningOnFallback) {
+                return;
+            }
+
             hasWarnings = true;
             responseBody[MESSAGE_KEY] += `${qi.component}::${qi.channel} had no value; `;
         }
@@ -209,13 +225,15 @@ interface RequestBody {
     host: string,
     username: string,
     password: string,
+    no_warning_on_fallback?: boolean,
     query: ChannelQueryItem[];
 }
 
 interface ChannelQueryItem {
     component: string,
     channel: string,
-    alias?: string;
+    alias?: string,
+    fallback?: string | number;
 }
 
 type ResponseBody = Record<string, string | number>;
